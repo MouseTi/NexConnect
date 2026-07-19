@@ -1,93 +1,103 @@
-# File trên VPS
+# NexConnect Updater
 
-Nếu bạn đã copy `NexConnect.exe` và `nexus_runtime.dll` thẳng lên VPS rồi thì **HÃY XÓA ĐI** vì 2 file đó là launcher thô, KHÔNG phải installer.
+Repo này chỉ chứa **manifest + script publish** cho auto-update của NexConnect.
+Source code chính ở máy local / repo riêng; repo này đóng vai trò **host lưu trữ release artifacts** qua GitHub Releases.
 
-```bash
-rm /var/www/updates/NexConnect.exe /var/www/updates/nexus_runtime.dll
-```
-
-Sau đó upload file thật:
+## Cấu trúc
 
 ```
-/var/www/updates/
-├── NexConnect.exe        ← installer (từ installer\Output\), KHÔNG phải build\Release
-├── nexus_runtime.dll     ← DLL anticheat mới (từ build\Release\)
-└── manifest.json         ← gen bằng scripts\make_manifest.ps1
+.
+├── .gitignore         # Bỏ qua binary, log, stage/
+├── manifest.json      # Manifest mẫu (URL trỏ GitHub Releases)
+├── publish-update.ps1 # Script build + tạo GitHub Release + upload
+└── README.md          # File này
 ```
 
----
-
-# Quy trình đúng trên máy Windows (đã xong rồi thì bỏ qua)
+## Lần đầu: cài `gh` CLI + đăng nhập
 
 ```powershell
-# 1. Bump version
-# Sửa CMakeLists.txt: project(NexConnect VERSION 1.0.1 LANGUAGES CXX)
-# Sửa installer/NexConnect.iss: #define MyAppVersion "1.0.1"
-
-# 2. Build installer
-cmake --build build --config Release
-scripts\build_installer.bat
-
-# 3. Gen manifest có SHA256 thật
-powershell -ExecutionPolicy Bypass -File scripts\make_manifest.ps1 `
-    -BaseUrl "http://104.234.180.103:3000/updates" `
-    -Version "1.0.1" `
-    -Installer "installer\Output\NexConnect.exe" `
-    -ExtraFile "build\Release\nexus_runtime.dll" `
-    -Message "Update anticheat"
+winget install --id GitHub.cli --accept-source-agreements --accept-package-agreements --silent
+gh auth login
 ```
 
----
+## Publish bản mới
 
-# Quy trình trên VPS `104.234.180.103`
-
-Mở PuTTY / PowerShell SSH:
+Trong `CMakeLists.txt` đã có `project(NexConnect VERSION 1.0.X LANGUAGES CXX)`. Script sẽ bump version tự động nếu truyền `-NewVersion`.
 
 ```powershell
-ssh root@104.234.180.103
+# Trong thư mục source gốc (F:\Nexconnect), KHÔNG phải dist-update/
+cd F:\Nexconnect
+$env:Path = "C:\Program Files\GitHub CLI;" + $env:Path
+
+powershell -ExecutionPolicy Bypass -File .\dist-update\publish-update.ps1 `
+    -NewVersion "1.0.5" `
+    -GitHubRepo "MouseTi/NexConnect"
 ```
 
-Chạy setup (1 lần):
+Script sẽ:
+1. Sửa `CMakeLists.txt` lên version mới (nếu khác)
+2. `cmake --build build --config Release --target NexConnect`
+3. Tính SHA256 của `NexConnect.exe` và `nexus_runtime.dll`
+4. `gh release create v<NewVersion>` + upload 3 file:
+   - `manifest.json` (cập nhật version + URL + hash mới)
+   - `NexConnect.exe`
+   - `nexus_runtime.dll`
+5. Nếu release đã tồn tại, script fail (cần xoá thủ công hoặc dùng `-Force`).
 
-```bash
-bash /root/setup-on-vps.sh
+## Cách client cập nhật
+
+Hard-coded URL trong `UpdateManager.cpp`:
+
+```cpp
+#define NEXCONNECT_UPDATE_MANIFEST_URL \
+  "https://github.com/MouseTi/NexConnect/releases/latest/download/manifest.json"
 ```
 
-Script này sẽ:
-- Cài nginx
-- Tạo `/var/www/updates/`
-- Listen port 3000
-- Trỏ `/updates/` → static file serving
-- Disable cache cho manifest
+`releases/latest/download/...` luôn trỏ về release mới nhất — không cần update URL khi bump version.
 
----
+## Manifest schema
 
-# Test trên VPS
-
-Sau khi upload 3 file (installer, dll, manifest) lên VPS:
-
-```bash
-ls -la /var/www/updates/
-# Phải thấy 3 file
-
-# Test manifest
-curl -s http://localhost:3000/updates/manifest.json | python3 -m json.tool
-# Phải hiện JSON đúng với version, sha256, files[]
-
-# Test binary (HTTP HEAD)
-curl -sI http://localhost:3000/updates/NexConnect.exe
-# Phải có Content-Length đúng (khoảng 25-50 MB tuỳ installer)
-
-# Test từ ngoài (chạy trên máy Windows)
-curl -s http://104.234.180.103:3000/updates/manifest.json | python3 -m json.tool
+```json
+{
+  "version": "1.0.4",
+  "url":     "https://github.com/MouseTi/NexConnect/releases/latest/download/NexConnect.exe",
+  "sha256":  "abc123...",
+  "required": false,
+  "message": "Tu v1.0.3 len v1.0.4",
+  "files": [
+    {
+      "path":   "build/Release/nexus_runtime.dll",
+      "url":    "https://github.com/MouseTi/NexConnect/releases/latest/download/nexus_runtime.dll",
+      "sha256": "def456...",
+      "action":  "replace"
+    }
+  ]
+}
 ```
 
----
+| Field | Bắt buộc | Ý nghĩa |
+|---|---|---|
+| `version` | ✅ | SemVer-ish |
+| `url` | ✅ | Trỏ tới binary installer/launcher |
+| `sha256` | ✅ | Client verify sau khi download |
+| `required` |  | Nếu `true`, client bắt buộc update không cho skip |
+| `message` |  | Hiện trong dialog |
+| `files[]` |  | File phụ cần thay kèm (DLL, data…) |
 
-# Bước cuối — test end-to-end
+## Xử lý lỗi thường gặp
 
-Trên máy Windows đã cài launcher bản cũ:
-1. Mở launcher → bấm "Kiểm tra cập nhật ngay"
-2. Phải hiện dialog: "Có bản cập nhật v1.0.1"
-3. Bấm UPDATE → download → install → restart
-4. Mở lại launcher → version phải là 1.0.1
+| Lỗi | Nguyên nhân | Fix |
+|---|---|---|
+| `gh: command not found` | `gh` chưa trong PATH | `winget install GitHub.cli` hoặc đặt `C:\Program Files\GitHub CLI` vào PATH |
+| `Invalid target_commitish` | Repo rỗng, chưa có branch `main` | `git init -b main && git add . && git commit` rồi `git push -u origin main` |
+| `Release.tag_name already exists` | Tag `v<NewVersion>` đã tồn tại | Đổi `-NewVersion`, hoặc `gh release delete v<X.Y.Z> --repo MouseTi/NexConnect` rồi chạy lại |
+
+## Debug nhanh
+
+```powershell
+# Xem release hiện tại
+gh release view --repo MouseTi/NexConnect
+
+# Xem manifest đang phát
+curl https://github.com/MouseTi/NexConnect/releases/latest/download/manifest.json
+```
