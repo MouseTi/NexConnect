@@ -1,0 +1,20 @@
+# Staging & transient
+stage/
+
+# Logs / debug
+*.log
+*.err
+
+# Backups
+*.bak
+
+# Binary artifacts (uploaded as GitHub Release assets, not committed)
+*.exe
+*.dll
+*.zip
+*.7z
+*.msi
+*.nsis
+
+# Per-user local manifests (never commit the override)
+manifest.local.json

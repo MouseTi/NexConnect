@@ -1,0 +1,15 @@
+{
+  "version": "1.0.3",
+  "url": "https://github.com/MouseTi/NexConnect/releases/latest/download/NexConnect.exe",
+  "sha256": "1e7267f9834f56db13dbe64edfdc3847928517f2b068ed51bfeb502ba02f5538",
+  "required": false,
+  "message": "Tu v1.0.1 len v1.0.3",
+  "files": [
+    {
+      "path": "build/Release/nexus_runtime.dll",
+      "url": "https://github.com/MouseTi/NexConnect/releases/latest/download/nexus_runtime.dll",
+      "action": "replace",
+      "sha256": "db243511b388cc9758789ebf7e2f15d6a6b027b900bfa99c3d53d9ec356f793b"
+    }
+  ]
+}
